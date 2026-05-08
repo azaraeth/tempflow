@@ -21,7 +21,8 @@ CY='\033[38;5;121m'   # mint green  (replaces cyan)
 # TEMPLATE STORAGE
 # ═══════════════════════════════════════════════
 
-TPL_DIR="$DATA/templates"
+# Global template store — shared across all installations
+TPL_DIR="$HOME/.snflow_templates"
 mkdir -p "$TPL_DIR"
 
 TPL_EXT=".snflow"
@@ -454,6 +455,89 @@ cmd_tpl_show() {
 }
 
 # ═══════════════════════════════════════════════
+# TREE VIEW — identical render to flow's tree
+# ═══════════════════════════════════════════════
+
+_tree_visited=()
+
+tree_node() {
+  local id="$1" prefix="$2" is_last="$3"
+  for r in "${_tree_visited[@]}"; do [[ "$r" == "$id" ]] && return; done
+  _tree_visited+=("$id")
+
+  local type sub lang preview
+  type=$(node_type "$id"); sub=$(node_subtype "$id")
+  lang=$(node_lang "$id"); preview=$(node_body "$id" | head -1 | cut -c1-38)
+
+  local branch="├─" child_pre="${prefix}│  "
+  [[ "$is_last" == "1" ]] && branch="└─" && child_pre="${prefix}   "
+  [[ -z "$prefix" ]] && branch="" && child_pre="   "
+
+  local tag_s tag_e
+  case "$type" in
+    start)   tag_s="${OR}${BD}"; tag_e="${RS}" ;;
+    end)     tag_s="${GR}";      tag_e="${RS}" ;;
+    command) tag_s="${WH}";      tag_e="${RS}" ;;
+    *)       tag_s="${GL}";      tag_e="${RS}" ;;
+  esac
+
+  local badge=""
+  [[ "$sub" == "script"   ]] && badge=" ${GY}[${BL}${lang}${GY}]${RS}"
+  [[ "$sub" == "text"     ]] && badge=" ${GY}[${WD}text${GY}]${RS}"
+  [[ "$sub" == "decision" ]] && badge=" ${GY}[${CY}decision${GY}:${BL}${lang}${GY}]${RS}"
+
+  local outs arrows=""
+  mapfile -t outs < <(conn_out "$id")
+  for o in "${outs[@]}"; do arrows+=" ${OD}→${RS}${GL}${o}${RS}"; done
+
+  echo -e "  ${GY}${prefix}${branch}${RS} ${tag_s}[${id}]${tag_e}${badge}${arrows}"
+  [[ -n "$preview" ]] && echo -e "  ${GY}${child_pre}│${RS}  ${DM}${WD}${preview}${RS}"
+
+  local kids=()
+  mapfile -t kids < <(conn_out "$id")
+  local nk=${#kids[@]}
+  for (( i=0; i<nk; i++ )); do
+    local last=0; [[ $((i+1)) -eq $nk ]] && last=1
+    tree_node "${kids[$i]}" "$child_pre" "$last"
+  done
+}
+
+cmd_tpl_tree() {
+  local target_proj="$1"
+
+  # if no project given, show project list and prompt
+  if [[ -z "$target_proj" ]]; then
+    PICKED_PROJ=""
+    pick_project "view tree of which project" || return
+    target_proj="$PICKED_PROJ"
+  fi
+
+  # validate project exists
+  [[ -d "$DATA/$target_proj" ]] || { err "project '$target_proj' not found — try: projects"; return; }
+
+  use_proj "$target_proj"
+
+  tpl_hdr "workflow tree [$target_proj]"
+  echo ""
+
+  local all=()
+  mapfile -t all < <(node_list)
+  if [[ ${#all[@]} -eq 0 ]]; then
+    info "project is empty"
+    echo ""; return
+  fi
+
+  _tree_visited=()
+  node_exists "start" && tree_node "start" "" "1"
+  for n in "${all[@]}"; do
+    local seen=0
+    for r in "${_tree_visited[@]}"; do [[ "$r" == "$n" ]] && seen=1; done
+    [[ $seen -eq 0 ]] && tree_node "$n" "" "1"
+  done
+  echo ""
+}
+
+# ═══════════════════════════════════════════════
 # CMD: projects — list all flow projects
 # ═══════════════════════════════════════════════
 
@@ -517,6 +601,7 @@ cmd_tpl_help() {
     "show <name>"                "inspect template details and node list"
     "rm <name>"                  "delete a saved template"
     "projects"                   "list all flow projects with node count and actions"
+    "tree [project]"             "view a project's workflow tree — same view as flow"
     "help"                       "this screen"
     "exit / quit"                "exit flowtpl"
   )
@@ -567,7 +652,7 @@ tpl_prompt() {
 
 main() {
   tpl_banner
-  info "type ${OR}help${RS}${WD} for commands  ·  templates: ${GL}${TPL_DIR}${RS}"
+  info "type ${OR}help${RS}${WD} for commands  ·  global templates: ${GL}${TPL_DIR}${RS}"
   echo ""
 
   local count=0
@@ -599,6 +684,7 @@ main() {
       show)           cmd_tpl_show   "$arg1" ;;
       rm|del)         cmd_tpl_rm     "$arg1" ;;
       projects|proj)  cmd_tpl_projects ;;
+      tree)           cmd_tpl_tree "$arg1" ;;
       clear)          tpl_banner; info "type ${OR}help${RS}${WD} for commands"; echo "" ;;
       help|h|\?)      cmd_tpl_help ;;
       exit|quit|q)    echo -e "\n  ${GY}bye.${RS}\n"; exit 0 ;;
