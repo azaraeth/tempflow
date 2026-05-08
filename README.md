@@ -53,15 +53,14 @@ switch mynewproject
 
 | Command | Description |
 |---|---|
-| `save <name> [desc]` | Save current flow project as a template |
-| `load <name> [project]` | Load a template into a new or existing project |
+| `projects` | List all flow projects with node count and save/load actions |
+| `save <name> [desc]` | Save a project as a template — prompts you to pick which project |
+| `load <name>` | Load a template — prompts you to pick or name a target project |
 | `import <path.snflow>` | Import a shared `.snflow` file from any path |
 | `export <name> [dest]` | Export a template to a shareable file |
 | `ls` | List all saved templates with author and description |
 | `show <name>` | Inspect template metadata and node list |
 | `rm <name>` | Delete a saved template |
-| `proj` | Show the currently active project |
-| `switch <project>` | Switch active project |
 | `help` | Command reference |
 | `exit / quit` | Exit flowtpl |
 
@@ -149,6 +148,13 @@ flowtpl uses a **green theme** to distinguish it from flow (orange) and flowmon 
 ---
 
 ## Changelog
+
+### v1.0.1
+- Removed `switch` and `proj` commands — no longer need to manually switch projects
+- Added `projects` command — lists all flow projects with node count and available actions
+- `save` now prompts you to pick a project interactively by name or number
+- `load` now shows the project list and lets you pick or type a new project name
+- Startup shows template count and project count together
 
 ### v1.0.0
 - Initial release alongside sn-flow v1.2.4
