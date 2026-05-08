@@ -54,6 +54,7 @@ switch mynewproject
 | Command | Description |
 |---|---|
 | `projects` | List all flow projects with node count and save/load actions |
+| `tree [project]` | View a project's workflow tree — identical to the view inside flow |
 | `save <name> [desc]` | Save a project as a template — prompts you to pick which project |
 | `load <name>` | Load a template — prompts you to pick or name a target project |
 | `import <path.snflow>` | Import a shared `.snflow` file from any path |
@@ -111,11 +112,13 @@ Because the format is plain text, templates can be shared via messaging apps, em
 
 ## Template Storage
 
-Templates are saved locally at:
+Templates are saved to a **global directory** shared across all installations:
 
 ```
-~/.flowterm/templates/<name>.snflow
+~/.snflow_templates/<name>.snflow
 ```
+
+This means templates are accessible from anywhere on the device regardless of where flowtpl is installed or run from. On a new device, copy the `~/.snflow_templates/` folder to share your entire template library at once.
 
 Each template stores a complete snapshot of the project at the time of saving — changes made to the project afterward are not reflected in the template unless you save again.
 
@@ -148,6 +151,11 @@ flowtpl uses a **green theme** to distinguish it from flow (orange) and flowmon 
 ---
 
 ## Changelog
+
+### v1.0.2
+- Templates now stored globally at `~/.snflow_templates/` — shared across installations
+- Added `tree [project]` command — renders identical workflow tree to flow's `tree` command
+- `tree` without arguments prompts project picker
 
 ### v1.0.1
 - Removed `switch` and `proj` commands — no longer need to manually switch projects
