@@ -27,6 +27,75 @@ mkdir -p "$TPL_DIR"
 TPL_EXT=".snflow"
 
 # ═══════════════════════════════════════════════
+# PROJECT HELPERS
+# ═══════════════════════════════════════════════
+
+# list all projects (directories inside DATA that have a connections file)
+list_projects() {
+  for d in "$DATA"/*/; do
+    [[ -d "$d" && -f "${d}connections" ]] && basename "$d"
+  done
+}
+
+# count nodes in a project
+proj_node_count() {
+  ls "$DATA/$1/nodes/"*.node 2>/dev/null | wc -l | tr -d ' '
+}
+
+# print project list table
+show_projects() {
+  tpl_hdr "available projects"
+  echo ""
+  local projs=()
+  mapfile -t projs < <(list_projects)
+  if [[ ${#projs[@]} -eq 0 ]]; then
+    info "no projects found — create one in flow with: init <name>"
+    echo ""; return 1
+  fi
+  printf "  ${GY}%-4s  %-22s  %s${RS}
+" "#" "PROJECT" "NODES"
+  echo -e "  ${GY}$(printf '─%.0s' {1..35})${RS}"
+  local i=1
+  for p in "${projs[@]}"; do
+    local nc; nc=$(proj_node_count "$p")
+    printf "  ${OR}%-4s${RS}  ${WH}%-22s${RS}  ${BL}%s nodes${RS}
+" "$i" "$p" "$nc"
+    i=$((i+1))
+  done
+  echo ""
+}
+
+# pick a project interactively — sets PICKED_PROJ
+pick_project() {
+  local prompt_msg="${1:-select project}"
+  local projs=()
+  mapfile -t projs < <(list_projects)
+  [[ ${#projs[@]} -eq 0 ]] && { err "no projects found"; return 1; }
+
+  show_projects
+  echo -ne "  ${GL}${prompt_msg} (name or #): ${RS}"
+  read -r pick
+
+  # number pick
+  if [[ "$pick" =~ ^[0-9]+$ ]]; then
+    local idx=$((pick-1))
+    if [[ $idx -ge 0 && $idx -lt ${#projs[@]} ]]; then
+      PICKED_PROJ="${projs[$idx]}"
+    else
+      err "invalid number"; return 1
+    fi
+  else
+    # name pick — validate it exists
+    local found=0
+    for p in "${projs[@]}"; do
+      [[ "$p" == "$pick" ]] && { found=1; break; }
+    done
+    [[ $found -eq 0 ]] && { err "project '$pick' not found"; return 1; }
+    PICKED_PROJ="$pick"
+  fi
+}
+
+# ═══════════════════════════════════════════════
 # BANNER
 # ═══════════════════════════════════════════════
 
@@ -72,9 +141,14 @@ tpl_meta_get() {
 cmd_tpl_save() {
   local tname="$1" desc="$2"
   [[ -z "$tname" ]] && { err "usage: save <template_name> [description]"; return; }
+
+  # pick which project to save
+  PICKED_PROJ=""
+  pick_project "save from which project" || return
+  use_proj "$PICKED_PROJ"
   require_init || return
 
-  tpl_hdr "save template: $tname"
+  tpl_hdr "save template: $tname  (from: $PICKED_PROJ)"
   echo ""
 
   # description prompt if not provided
@@ -165,11 +239,37 @@ cmd_tpl_load() {
   echo -e "  ${GL}nodes        ${RS}${OR}${tnodes}${RS}"
   echo ""
 
-  # target project
-  if [[ -z "$target_proj" ]]; then
-    echo -ne "  ${GL}load into project (enter=current '${PROJ}'): ${RS}"
-    read -r target_proj
-    [[ -z "$target_proj" ]] && target_proj="$PROJ"
+  # pick or enter target project
+  echo ""
+  echo -e "  ${GL}load into an existing project or type a new project name${RS}"
+  echo ""
+  local projs=()
+  mapfile -t projs < <(list_projects)
+  if [[ ${#projs[@]} -gt 0 ]]; then
+    printf "  ${GY}%-4s  %-22s  %s${RS}
+" "#" "PROJECT" "NODES"
+    echo -e "  ${GY}$(printf '─%.0s' {1..35})${RS}"
+    local i=1
+    for p in "${projs[@]}"; do
+      local nc; nc=$(proj_node_count "$p")
+      printf "  ${OR}%-4s${RS}  ${WH}%-22s${RS}  ${BL}%s nodes${RS}
+" "$i" "$p" "$nc"
+      i=$((i+1))
+    done
+    echo ""
+  fi
+  echo -ne "  ${GL}project name or # (new name creates a fresh project): ${RS}"
+  read -r target_proj
+  [[ -z "$target_proj" ]] && { info "cancelled"; return; }
+
+  # resolve number pick
+  if [[ "$target_proj" =~ ^[0-9]+$ ]]; then
+    local idx=$((target_proj-1))
+    if [[ $idx -ge 0 && $idx -lt ${#projs[@]} ]]; then
+      target_proj="${projs[$idx]}"
+    else
+      err "invalid number"; return
+    fi
   fi
 
   # warn if project exists and has nodes
@@ -177,7 +277,7 @@ cmd_tpl_load() {
   if node_exists "start" 2>/dev/null; then
     echo -ne "  ${OD}project '${target_proj}' already has nodes — overwrite? [y/N] ${RS}"
     read -r c
-    [[ "$c" == "y" || "$c" == "Y" ]] || { info "cancelled"; use_proj "$PROJ"; return; }
+    [[ "$c" == "y" || "$c" == "Y" ]] || { info "cancelled"; return; }
     # wipe existing nodes and connections
     rm -f "$NODES"/*.node
     > "$CONNS"
@@ -225,8 +325,7 @@ cmd_tpl_load() {
 
   ok "loaded: ${OR}${tname}${RS}  →  project ${OR}${target_proj}${RS}"
   info "nodes restored: ${OR}${loaded_nodes}${RS}"
-  echo ""
-  info "switch to it in flow with: ${OR}switch ${target_proj}${RS}"
+  info "open flow and use: ${OR}switch ${target_proj}${RS}  to run it"
   echo ""
 }
 
@@ -355,6 +454,36 @@ cmd_tpl_show() {
 }
 
 # ═══════════════════════════════════════════════
+# CMD: projects — list all flow projects
+# ═══════════════════════════════════════════════
+
+cmd_tpl_projects() {
+  local projs=()
+  mapfile -t projs < <(list_projects)
+  if [[ ${#projs[@]} -eq 0 ]]; then
+    info "no projects found — create one in flow with: ${OR}init <name>${RS}"
+    echo ""; return
+  fi
+  tpl_hdr "flow projects"
+  echo ""
+  printf "  ${GY}%-4s  %-22s  %-10s  %s${RS}
+" "#" "PROJECT" "NODES" "ACTIONS"
+  echo -e "  ${GY}$(printf '─%.0s' {1..60})${RS}"
+  local i=1
+  for p in "${projs[@]}"; do
+    local nc; nc=$(proj_node_count "$p")
+    printf "  ${OR}%-4s${RS}  ${WH}%-22s${RS}  ${BL}%-10s${RS}  ${GY}save %s · load → %s${RS}
+"       "$i" "$p" "${nc} nodes" "$p" "$p"
+    i=$((i+1))
+  done
+  echo ""
+  info "save a project  : ${OR}save <template_name>${RS}"
+  info "load a template : ${OR}load <template_name>${RS}"
+  info "list templates  : ${OR}ls${RS}"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════
 # CMD: rm — delete a template
 # ═══════════════════════════════════════════════
 
@@ -387,8 +516,7 @@ cmd_tpl_help() {
     "ls"                         "list all saved templates"
     "show <name>"                "inspect template details and node list"
     "rm <name>"                  "delete a saved template"
-    "proj"                       "show current active project"
-    "switch <project>"           "switch active project"
+    "projects"                   "list all flow projects with node count and actions"
     "help"                       "this screen"
     "exit / quit"                "exit flowtpl"
   )
@@ -440,15 +568,17 @@ tpl_prompt() {
 main() {
   tpl_banner
   info "type ${OR}help${RS}${WD} for commands  ·  templates: ${GL}${TPL_DIR}${RS}"
-  info "active project: ${OR}${PROJ}${RS}"
   echo ""
 
   local count=0
   count=$(tpl_list_files 2>/dev/null | wc -l | tr -d ' ')
+  local pcount=0
+  pcount=$(list_projects | wc -l | tr -d ' ')
   if [[ $count -gt 0 ]]; then
-    info "${count} template(s) saved"
+    info "${count} template(s) saved  ·  ${pcount} project(s) available"
   else
-    info "no templates yet — save one with: ${OR}save <name>${RS}"
+    info "no templates yet  ·  ${pcount} project(s) available"
+    info "run ${OR}projects${RS}${WD} to see them, then ${OR}save <name>${RS}${WD} to create a template"
   fi
   echo ""
 
@@ -468,8 +598,7 @@ main() {
       ls|list)        cmd_tpl_ls ;;
       show)           cmd_tpl_show   "$arg1" ;;
       rm|del)         cmd_tpl_rm     "$arg1" ;;
-      proj)           info "active project: ${OR}${PROJ}${RS}"; echo "" ;;
-      switch)         use_proj "$arg1"; ok "switched to: ${OR}${arg1}${RS}"; echo "" ;;
+      projects|proj)  cmd_tpl_projects ;;
       clear)          tpl_banner; info "type ${OR}help${RS}${WD} for commands"; echo "" ;;
       help|h|\?)      cmd_tpl_help ;;
       exit|quit|q)    echo -e "\n  ${GY}bye.${RS}\n"; exit 0 ;;
